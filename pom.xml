@@ -63,6 +63,20 @@
             <artifactId>gravitee-policy-api</artifactId>
             <scope>provided</scope>
         </dependency>
+
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-rx-java3</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-web-client</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         
         <!-- Lombok -->
         <dependency>
@@ -85,6 +99,12 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.gravitee.apim.gateway</groupId>
+            <artifactId>gravitee-apim-gateway-buffer</artifactId>
+            <version>${gravitee-apim.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

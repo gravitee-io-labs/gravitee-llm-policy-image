@@ -1,6 +1,37 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "properties": {},
-  "required": []
+  "additionalProperties": false,
+  "properties": {
+    "visionEndpoint": {
+      "title": "Vision Model Endpoint",
+      "type": "string",
+      "description": "URL of the vision model API (e.g., http://localhost:8000/v1/chat/completions)",
+      "gioConfig": {
+        "banner": {
+          "title": "Vision Model Endpoint",
+          "text": "The HTTP endpoint of your vision model service (VLLM, etc.)"
+        }
+      }
+    },
+    "modelName": {
+      "title": "Model Name",
+      "type": "string",
+      "default": "qwen3-vl",
+      "description": "Name of the vision model to use"
+    },
+    "validationPrompt": {
+      "title": "Validation Prompt",
+      "type": "string",
+      "default": "Describe this image in a few words.",
+      "description": "Prompt sent with each image for validation"
+    },
+    "timeoutMs": {
+      "title": "Timeout (ms)",
+      "type": "integer",
+      "default": 30000,
+      "description": "Timeout for vision model API calls in milliseconds"
+    }
+  },
+  "required": ["visionEndpoint"]
 }
