@@ -24,6 +24,7 @@ import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.rxjava3.core.Vertx;
 import java.util.List;
+import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -33,12 +34,42 @@ public class LlmImagePolicy implements HttpPolicy {
   private static final String REDACTED_MESSAGE =
     "[Image redacted: validation failed]";
   private static final String ENV_VISION_ENDPOINT =
-    "GRAVITEE_LLM_IMAGE_VISION_ENDPOINT";
+    "http://localhost:8082/local-llm/chat/completions";
 
-  private static final String DEFAULT_MODEL_NAME = "qwen3-vl";
-  private static final String DEFAULT_VALIDATION_PROMPT =
-    "Describe this image in a few words.";
+  private static final String DEFAULT_MODEL_NAME = "qwen3-vl:qwen3-vl:2b";
+  private static final String PROMPT_TEMPLATE =
+    """
+    You are an image content moderator. Analyze this image and determine if it should be ACCEPTED or REJECTED.
+
+    REJECT images that contain:
+    %s
+
+    ACCEPT images that are:
+    %s
+
+    Respond ONLY with a JSON object in this exact format:
+    {"decision": "ACCEPT" or "REJECT", "confidence": 0.0-1.0, "reason": "brief explanation", "flags": ["list", "of", "concerns"]}
+
+    Do not include any text outside the JSON object.
+    """;
   private static final int DEFAULT_TIMEOUT_MS = 30000;
+
+  private static final List<String> DEFAULT_REJECTED_CATEGORIES = List.of(
+    "Explicit sexual content or nudity",
+    "Graphic violence or gore",
+    "Hate symbols or extremist content",
+    "Illegal activities",
+    "Child exploitation (always reject immediately)",
+    "Spam, scams, or phishing attempts",
+    "Personal identifying information (IDs, credit cards, etc.)"
+  );
+
+  private static final List<String> DEFAULT_ACCEPTED_CATEGORIES = List.of(
+    "Safe for general audiences",
+    "Professional or educational content",
+    "Artistic content without explicit material",
+    "General photography, illustrations, diagrams"
+  );
 
   private final LlmImagePolicyConfiguration config;
 
@@ -103,6 +134,16 @@ public class LlmImagePolicy implements HttpPolicy {
     }
 
     List<ImageContent> images = ImageExtractor.extractImages(requestBody);
+    log.info("Found {} image(s) in request", images.size());
+    if (!images.isEmpty()) {
+      images.forEach(img ->
+        log.info(
+          "  - Image at path: {} ({})",
+          String.join(".", img.jsonPath()),
+          img.isBase64() ? "base64" : "url"
+        )
+      );
+    }
     if (images.isEmpty()) {
       return Completable.complete();
     }
@@ -125,12 +166,21 @@ public class LlmImagePolicy implements HttpPolicy {
       .flatMapCompletable(results -> {
         boolean modified = false;
         for (ValidationResult result : results) {
+          log.info(
+            "Validation result for image at {}: {}",
+            String.join(".", result.image().jsonPath()),
+            result.valid() ? "PASSED" : "FAILED"
+          );
           if (!result.valid()) {
             redactImage(requestBody, result.image().jsonPath());
             modified = true;
           }
         }
         if (modified) {
+          log.info(
+            "Request body modified: {} image(s) redacted",
+            results.stream().filter(r -> !r.valid()).count()
+          );
           ctx.request().body(Buffer.buffer(requestBody.encode()));
         }
         return Completable.complete();
@@ -143,13 +193,25 @@ public class LlmImagePolicy implements HttpPolicy {
       System.getenv(ENV_VISION_ENDPOINT)
     );
     String modelName = firstNonBlank(config.getModelName(), DEFAULT_MODEL_NAME);
-    String validationPrompt = firstNonBlank(
-      config.getValidationPrompt(),
-      DEFAULT_VALIDATION_PROMPT
-    );
     int timeoutMs = config.getTimeoutMs() > 0
       ? config.getTimeoutMs()
       : DEFAULT_TIMEOUT_MS;
+
+    // Get category lists from config or use defaults
+    List<String> rejectedCategories = config.getRejectedCategories() != null &&
+      !config.getRejectedCategories().isEmpty()
+      ? config.getRejectedCategories()
+      : DEFAULT_REJECTED_CATEGORIES;
+    List<String> acceptedCategories = config.getAcceptedCategories() != null &&
+      !config.getAcceptedCategories().isEmpty()
+      ? config.getAcceptedCategories()
+      : DEFAULT_ACCEPTED_CATEGORIES;
+
+    // If validationPrompt is explicitly set, use it; otherwise build from categories
+    String validationPrompt = config.getValidationPrompt() != null &&
+      !config.getValidationPrompt().isBlank()
+      ? config.getValidationPrompt()
+      : buildValidationPrompt(rejectedCategories, acceptedCategories);
 
     return LlmImagePolicyConfiguration
       .builder()
@@ -157,7 +219,24 @@ public class LlmImagePolicy implements HttpPolicy {
       .modelName(modelName)
       .validationPrompt(validationPrompt)
       .timeoutMs(timeoutMs)
+      .rejectedCategories(rejectedCategories)
+      .acceptedCategories(acceptedCategories)
       .build();
+  }
+
+  private String buildValidationPrompt(
+    List<String> rejectedCategories,
+    List<String> acceptedCategories
+  ) {
+    String rejectedList = rejectedCategories
+      .stream()
+      .map(cat -> "- " + cat)
+      .collect(Collectors.joining("\n"));
+    String acceptedList = acceptedCategories
+      .stream()
+      .map(cat -> "- " + cat)
+      .collect(Collectors.joining("\n"));
+    return String.format(PROMPT_TEMPLATE, rejectedList, acceptedList);
   }
 
   private static String firstNonBlank(String... values) {
@@ -180,7 +259,7 @@ public class LlmImagePolicy implements HttpPolicy {
     Object parent = resolveParent(original, jsonPath);
     String lastSegment = jsonPath[jsonPath.length - 1];
     JsonObject redacted = new JsonObject()
-      .put("type", "input_text")
+      .put("type", "text")
       .put("text", REDACTED_MESSAGE);
 
     if (parent instanceof JsonArray array) {

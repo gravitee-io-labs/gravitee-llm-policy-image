@@ -25,10 +25,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ImageExtractor {
 
-  private static final String INPUT_FIELD = "input";
+  private static final String INPUT_FIELD = "messages";
   private static final String CONTENT_FIELD = "content";
   private static final String TYPE_FIELD = "type";
-  private static final String IMAGE_TYPE = "input_image";
+  private static final String IMAGE_TYPE = "image_url";
   private static final String IMAGE_URL_FIELD = "image_url";
   private static final String IMAGE_URL_VALUE_FIELD = "url";
 
@@ -38,36 +38,43 @@ public class ImageExtractor {
    *
    * Expected format:
    * {
-   *   "input": [{
-   *     "role": "user",
-   *     "content": [
-   *       {"type": "input_text", "text": "..."},
-   *       {"type": "input_image", "image_url": "https://..." }
-   *     ]
-   *   }]
-   * }
+   *   "model" : "qwen3-vl:qwen3-vl:2b",
+   *   "messages" : [
+   *     {
+   *       "role" : "user",
+   *       "content" : [
+   *         {
+   *           "type" : "text",
+   *           "text" : "Describe this image."
+   *         },
+   *         {
+   *           "type" : "image_url",
+   *           "image_url" : {
+   *             "url" : "data:image/png;base64,..."
+   *         }]
+   *       }
+   *   ]}
    */
   public static List<ImageContent> extractImages(JsonObject requestBody) {
     if (requestBody == null) {
       return Collections.emptyList();
     }
 
-    Object input = requestBody.getValue(INPUT_FIELD);
-    if (!(input instanceof JsonArray inputArray)) {
-      return Collections.emptyList();
+    List<ImageContent> images = new ArrayList<>();
+    JsonArray messagesArray = requestBody.getJsonArray(INPUT_FIELD);
+    if (messagesArray == null) {
+      return images;
     }
 
-    List<ImageContent> images = new ArrayList<>();
-    for (int inputIndex = 0; inputIndex < inputArray.size(); inputIndex++) {
-      Object inputEntry = inputArray.getValue(inputIndex);
-      if (!(inputEntry instanceof JsonObject inputObject)) {
-        continue;
+    for (int inputIndex = 0; inputIndex < messagesArray.size(); inputIndex++) {
+      Object inputEntry = messagesArray.getValue(inputIndex);
+      if (inputEntry instanceof JsonObject inputObject) {
+        extractFromContent(
+          images,
+          inputIndex,
+          inputObject.getValue(CONTENT_FIELD)
+        );
       }
-      extractFromContent(
-        images,
-        inputIndex,
-        inputObject.getValue(CONTENT_FIELD)
-      );
     }
 
     return images;

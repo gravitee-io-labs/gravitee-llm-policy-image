@@ -28,7 +28,7 @@ class ImageExtractorTest {
   void extractsUrlBasedImages() {
     JsonObject requestBody = new JsonObject()
       .put(
-        "input",
+        "messages",
         new JsonArray()
           .add(
             new JsonObject()
@@ -36,13 +36,11 @@ class ImageExtractorTest {
                 "content",
                 new JsonArray()
                   .add(
-                    new JsonObject()
-                      .put("type", "input_text")
-                      .put("text", "hello")
+                    new JsonObject().put("type", "text").put("text", "hello")
                   )
                   .add(
                     new JsonObject()
-                      .put("type", "input_image")
+                      .put("type", "image_url")
                       .put("image_url", "https://example.com/image.png")
                   )
               )
@@ -55,7 +53,8 @@ class ImageExtractorTest {
     ImageContent image = images.get(0);
     assertThat(image.imageUrl()).isEqualTo("https://example.com/image.png");
     assertThat(image.isUrl()).isTrue();
-    assertThat(image.jsonPath()).containsExactly("input", "0", "content", "1");
+    assertThat(image.jsonPath())
+      .containsExactly("messages", "0", "content", "1");
   }
 
   @Test
@@ -63,7 +62,7 @@ class ImageExtractorTest {
     String dataUrl = "data:image/png;base64,abcd";
     JsonObject requestBody = new JsonObject()
       .put(
-        "input",
+        "messages",
         new JsonArray()
           .add(
             new JsonObject()
@@ -72,7 +71,7 @@ class ImageExtractorTest {
                 new JsonArray()
                   .add(
                     new JsonObject()
-                      .put("type", "input_image")
+                      .put("type", "image_url")
                       .put("image_url", dataUrl)
                   )
               )
@@ -91,7 +90,7 @@ class ImageExtractorTest {
   void extractsMultipleImagesFromConversation() {
     JsonObject requestBody = new JsonObject()
       .put(
-        "input",
+        "messages",
         new JsonArray()
           .add(
             new JsonObject()
@@ -100,7 +99,7 @@ class ImageExtractorTest {
                 new JsonArray()
                   .add(
                     new JsonObject()
-                      .put("type", "input_image")
+                      .put("type", "image_url")
                       .put("image_url", "https://example.com/first.png")
                   )
               )
@@ -110,14 +109,10 @@ class ImageExtractorTest {
               .put(
                 "content",
                 new JsonArray()
+                  .add(new JsonObject().put("type", "text").put("text", "next"))
                   .add(
                     new JsonObject()
-                      .put("type", "input_text")
-                      .put("text", "next")
-                  )
-                  .add(
-                    new JsonObject()
-                      .put("type", "input_image")
+                      .put("type", "image_url")
                       .put("image_url", "https://example.com/second.png")
                   )
               )
@@ -128,7 +123,7 @@ class ImageExtractorTest {
 
     assertThat(images).hasSize(2);
     assertThat(images.get(1).jsonPath())
-      .containsExactly("input", "1", "content", "1");
+      .containsExactly("messages", "1", "content", "1");
     assertThat(images.get(1).imageUrl())
       .isEqualTo("https://example.com/second.png");
   }
@@ -137,7 +132,7 @@ class ImageExtractorTest {
   void returnsEmptyWhenNoImages() {
     JsonObject requestBody = new JsonObject()
       .put(
-        "input",
+        "messages",
         new JsonArray()
           .add(
             new JsonObject()
@@ -146,7 +141,7 @@ class ImageExtractorTest {
                 new JsonArray()
                   .add(
                     new JsonObject()
-                      .put("type", "input_text")
+                      .put("type", "text")
                       .put("text", "only text")
                   )
               )

@@ -16,6 +16,7 @@
 package io.gravitee.policy.llm.image;
 
 import io.gravitee.policy.api.PolicyConfiguration;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -36,11 +37,31 @@ public class LlmImagePolicyConfiguration implements PolicyConfiguration {
   @Builder.Default
   private String modelName = "qwen3-vl";
 
-  /** Prompt to send with the image for validation */
-  @Builder.Default
-  private String validationPrompt = "Describe this image in a few words.";
+  /** Prompt to send with the image for validation (overrides template if set) */
+  private String validationPrompt;
 
   /** Timeout in milliseconds for vision model calls */
   @Builder.Default
   private int timeoutMs = 30000;
+
+  /** List of content categories to reject */
+  @Builder.Default
+  private List<String> rejectedCategories = List.of(
+    "Explicit sexual content or nudity",
+    "Graphic violence or gore",
+    "Hate symbols or extremist content",
+    "Illegal activities",
+    "Child exploitation",
+    "Spam, scams, or phishing attempts",
+    "Personal identifying information (IDs, credit cards, etc.)"
+  );
+
+  /** List of content categories to accept */
+  @Builder.Default
+  private List<String> acceptedCategories = List.of(
+    "Safe for general audiences",
+    "Professional or educational content",
+    "Artistic content without explicit material",
+    "General photography, illustrations, diagrams"
+  );
 }

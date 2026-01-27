@@ -85,12 +85,12 @@ class LlmImagePolicyTest {
 
       JsonObject modified = new JsonObject(bodyCaptor.getValue().toString());
       JsonObject contentItem = modified
-        .getJsonArray("input")
+        .getJsonArray("messages")
         .getJsonObject(0)
         .getJsonArray("content")
         .getJsonObject(1);
 
-      assertThat(contentItem.getString("type")).isEqualTo("input_text");
+      assertThat(contentItem.getString("type")).isEqualTo("text");
       assertThat(contentItem.getString("text"))
         .isEqualTo("[Image redacted: validation failed]");
     } finally {
@@ -126,14 +126,15 @@ class LlmImagePolicyTest {
 
       JsonObject modified = new JsonObject(bodyCaptor.getValue().toString());
       JsonArray content = modified
-        .getJsonArray("input")
+        .getJsonArray("messages")
         .getJsonObject(0)
         .getJsonArray("content");
 
-      assertThat(content.getJsonObject(0).getString("image_url"))
+      assertThat(
+        content.getJsonObject(0).getJsonObject("image_url").getString("url")
+      )
         .isEqualTo("https://example.com/good.png");
-      assertThat(content.getJsonObject(1).getString("type"))
-        .isEqualTo("input_text");
+      assertThat(content.getJsonObject(1).getString("type")).isEqualTo("text");
       assertThat(content.getJsonObject(1).getString("text"))
         .isEqualTo("[Image redacted: validation failed]");
     } finally {
@@ -151,7 +152,7 @@ class LlmImagePolicyTest {
   private static JsonObject singleImageRequest() {
     return new JsonObject()
       .put(
-        "input",
+        "messages",
         new JsonArray()
           .add(
             new JsonObject()
@@ -159,14 +160,16 @@ class LlmImagePolicyTest {
                 "content",
                 new JsonArray()
                   .add(
-                    new JsonObject()
-                      .put("type", "input_text")
-                      .put("text", "hello")
+                    new JsonObject().put("type", "text").put("text", "hello")
                   )
                   .add(
                     new JsonObject()
-                      .put("type", "input_image")
-                      .put("image_url", "https://example.com/image.png")
+                      .put("type", "image_url")
+                      .put(
+                        "image_url",
+                        new JsonObject()
+                          .put("url", "https://example.com/image.png")
+                      )
                   )
               )
           )
@@ -176,7 +179,7 @@ class LlmImagePolicyTest {
   private static JsonObject mixedImagesRequest() {
     return new JsonObject()
       .put(
-        "input",
+        "messages",
         new JsonArray()
           .add(
             new JsonObject()
@@ -185,13 +188,21 @@ class LlmImagePolicyTest {
                 new JsonArray()
                   .add(
                     new JsonObject()
-                      .put("type", "input_image")
-                      .put("image_url", "https://example.com/good.png")
+                      .put("type", "image_url")
+                      .put(
+                        "image_url",
+                        new JsonObject()
+                          .put("url", "https://example.com/good.png")
+                      )
                   )
                   .add(
                     new JsonObject()
-                      .put("type", "input_image")
-                      .put("image_url", "https://example.com/bad.png")
+                      .put("type", "image_url")
+                      .put(
+                        "image_url",
+                        new JsonObject()
+                          .put("url", "https://example.com/bad.png")
+                      )
                   )
               )
           )

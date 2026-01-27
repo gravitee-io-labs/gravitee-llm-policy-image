@@ -21,16 +21,46 @@
       "description": "Name of the vision model to use"
     },
     "validationPrompt": {
-      "title": "Validation Prompt",
+      "title": "Validation Prompt (Override)",
       "type": "string",
-      "default": "Describe this image in a few words.",
-      "description": "Prompt sent with each image for validation"
+      "description": "Custom prompt to send with each image. If set, overrides the template-based prompt built from categories."
     },
     "timeoutMs": {
       "title": "Timeout (ms)",
       "type": "integer",
       "default": 30000,
       "description": "Timeout for vision model API calls in milliseconds"
+    },
+    "rejectedCategories": {
+      "title": "Rejected Content Categories",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "Explicit sexual content or nudity",
+        "Graphic violence or gore",
+        "Hate symbols or extremist content",
+        "Illegal activities",
+        "Child exploitation",
+        "Spam, scams, or phishing attempts",
+        "Personal identifying information (IDs, credit cards, etc.)"
+      ],
+      "description": "List of content categories that should be rejected"
+    },
+    "acceptedCategories": {
+      "title": "Accepted Content Categories",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [
+        "Safe for general audiences",
+        "Professional or educational content",
+        "Artistic content without explicit material",
+        "General photography, illustrations, diagrams"
+      ],
+      "description": "List of content categories that should be accepted"
     }
   },
   "required": ["visionEndpoint"]
