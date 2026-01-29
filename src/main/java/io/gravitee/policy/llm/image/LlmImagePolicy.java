@@ -132,11 +132,7 @@ public class LlmImagePolicy implements HttpPolicy {
     Throwable current = throwable;
     while (current != null) {
       // Network/connection errors from the vision client can be ignored
-      if (
-        current instanceof java.net.ConnectException ||
-        current instanceof java.net.SocketTimeoutException ||
-        current instanceof java.io.IOException
-      ) {
+      if (current instanceof java.io.IOException) {
         return true;
       }
       current = current.getCause();
