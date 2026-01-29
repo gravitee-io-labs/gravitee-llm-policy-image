@@ -107,10 +107,34 @@ public class LlmImagePolicy implements HttpPolicy {
       .request()
       .body()
       .flatMapCompletable(body -> handleBody(ctx, body, effectiveConfig))
-      .doOnError(error ->
-        log.warn("Failed to process request body for image validation", error)
-      )
-      .onErrorComplete();
+      .onErrorResumeNext(throwable -> {
+        // Let interrupt signals propagate - these are intentional blocks
+        if (isInterruptSignal(throwable)) {
+          return Completable.error(throwable);
+        }
+        // Log and swallow unexpected errors (JSON parsing, client failures)
+        log.warn(
+          "Failed to process request body for image validation",
+          throwable
+        );
+        return Completable.complete();
+      });
+  }
+
+  /**
+   * Check if this throwable is an interrupt signal from ctx.interruptWith().
+   * These should propagate to the framework, not be swallowed.
+   */
+  private boolean isInterruptSignal(Throwable throwable) {
+    // The framework may signal interrupts via specific exception types
+    // or the throwable may come from the Completable returned by interruptWith
+    String className = throwable.getClass().getName();
+    return (
+      className.contains("Interrupt") ||
+      className.contains("interrupt") ||
+      throwable.getMessage() != null &&
+      throwable.getMessage().contains("Interrupt")
+    );
   }
 
   protected VisionModelClient createClient(

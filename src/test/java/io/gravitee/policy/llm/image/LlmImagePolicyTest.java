@@ -171,6 +171,50 @@ class LlmImagePolicyTest {
   // BLOCK MODE TESTS
   // ========================================
 
+  /**
+   * This test demonstrates the bug: when interruptWith() signals via error
+   * (which is how the framework can signal interruption), the error should
+   * propagate to the caller. Currently it gets swallowed by onErrorComplete().
+   */
+  @Test
+  void blockModeErrorSignalPropagates() {
+    VisionModelClient client = mock(VisionModelClient.class);
+    when(client.validateImage(any())).thenReturn(Single.just(false));
+
+    LlmImagePolicy policy = new TestPolicy(blockConfig(), client);
+
+    Vertx vertx = Vertx.vertx();
+    try {
+      HttpPlainExecutionContext ctx = mock(HttpPlainExecutionContext.class);
+      HttpPlainRequest request = mock(HttpPlainRequest.class);
+      when(ctx.request()).thenReturn(request);
+      when(ctx.getComponent(Vertx.class)).thenReturn(vertx);
+      when(request.body())
+        .thenReturn(Maybe.just(Buffer.buffer(singleImageRequest().encode())));
+
+      // Simulate interruptWith signaling via error (framework behavior)
+      RuntimeException interruptSignal = new RuntimeException(
+        "Interrupt signal"
+      );
+      when(ctx.interruptWith(any(ExecutionFailure.class)))
+        .thenReturn(Completable.error(interruptSignal));
+
+      TestObserver<Void> observer = policy.onRequest(ctx).test();
+
+      // The error should propagate, not be swallowed
+      observer.assertError(interruptSignal);
+
+      // Verify interruptWith was still called with correct parameters
+      ArgumentCaptor<ExecutionFailure> failureCaptor = ArgumentCaptor.forClass(
+        ExecutionFailure.class
+      );
+      verify(ctx).interruptWith(failureCaptor.capture());
+      assertThat(failureCaptor.getValue().statusCode()).isEqualTo(400);
+    } finally {
+      vertx.close();
+    }
+  }
+
   @Test
   void blocksRequestWhenValidationFailsInBlockMode() {
     VisionModelClient client = mock(VisionModelClient.class);
