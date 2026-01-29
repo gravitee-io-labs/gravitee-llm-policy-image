@@ -23,28 +23,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.gravitee.gateway.api.buffer.Buffer;
-import io.gravitee.gateway.api.buffer.Buffer;
 import io.gravitee.gateway.reactive.api.ExecutionFailure;
 import io.gravitee.gateway.reactive.api.context.http.HttpPlainExecutionContext;
-import io.gravitee.gateway.reactive.api.context.http.HttpPlainExecutionContext;
-import io.gravitee.gateway.reactive.api.context.http.HttpPlainRequest;
 import io.gravitee.gateway.reactive.api.context.http.HttpPlainRequest;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Maybe;
-import io.reactivex.rxjava3.core.Maybe;
-import io.reactivex.rxjava3.core.Single;
 import io.reactivex.rxjava3.core.Single;
 import io.reactivex.rxjava3.observers.TestObserver;
-import io.reactivex.rxjava3.observers.TestObserver;
-import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import io.vertx.core.json.JsonObject;
-import io.vertx.rxjava3.core.Vertx;
 import io.vertx.rxjava3.core.Vertx;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentCaptor;
 
 class LlmImagePolicyTest {
@@ -170,6 +159,14 @@ class LlmImagePolicyTest {
       .build();
   }
 
+  private static LlmImagePolicyConfiguration blockConfig() {
+    return LlmImagePolicyConfiguration
+      .builder()
+      .visionEndpoint("http://localhost:8000/v1/chat/completions")
+      .onViolation(ViolationMode.BLOCK)
+      .build();
+  }
+
   // ========================================
   // BLOCK MODE TESTS
   // ========================================
@@ -179,7 +176,7 @@ class LlmImagePolicyTest {
     VisionModelClient client = mock(VisionModelClient.class);
     when(client.validateImage(any())).thenReturn(Single.just(false));
 
-    LlmImagePolicy policy = new TestPolicy(config(), client);
+    LlmImagePolicy policy = new TestPolicy(blockConfig(), client);
 
     Vertx vertx = Vertx.vertx();
     try {
@@ -217,7 +214,7 @@ class LlmImagePolicyTest {
     VisionModelClient client = mock(VisionModelClient.class);
     when(client.validateImage(any())).thenReturn(Single.just(true));
 
-    LlmImagePolicy policy = new TestPolicy(config(), client);
+    LlmImagePolicy policy = new TestPolicy(blockConfig(), client);
 
     Vertx vertx = Vertx.vertx();
     try {
