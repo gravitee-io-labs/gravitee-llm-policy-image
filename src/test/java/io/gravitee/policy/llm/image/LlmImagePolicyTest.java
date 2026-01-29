@@ -23,15 +23,28 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import io.gravitee.gateway.api.buffer.Buffer;
+import io.gravitee.gateway.api.buffer.Buffer;
+import io.gravitee.gateway.reactive.api.ExecutionFailure;
+import io.gravitee.gateway.reactive.api.context.http.HttpPlainExecutionContext;
 import io.gravitee.gateway.reactive.api.context.http.HttpPlainExecutionContext;
 import io.gravitee.gateway.reactive.api.context.http.HttpPlainRequest;
+import io.gravitee.gateway.reactive.api.context.http.HttpPlainRequest;
+import io.reactivex.rxjava3.core.Completable;
+import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Maybe;
 import io.reactivex.rxjava3.core.Single;
+import io.reactivex.rxjava3.core.Single;
+import io.reactivex.rxjava3.observers.TestObserver;
 import io.reactivex.rxjava3.observers.TestObserver;
 import io.vertx.core.json.JsonArray;
+import io.vertx.core.json.JsonArray;
+import io.vertx.core.json.JsonObject;
 import io.vertx.core.json.JsonObject;
 import io.vertx.rxjava3.core.Vertx;
+import io.vertx.rxjava3.core.Vertx;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentCaptor;
 
 class LlmImagePolicyTest {
@@ -66,7 +79,7 @@ class LlmImagePolicyTest {
     VisionModelClient client = mock(VisionModelClient.class);
     when(client.validateImage(any())).thenReturn(Single.just(false));
 
-    LlmImagePolicy policy = new TestPolicy(config(), client);
+    LlmImagePolicy policy = new TestPolicy(redactConfig(), client);
 
     Vertx vertx = Vertx.vertx();
     try {
@@ -107,7 +120,7 @@ class LlmImagePolicyTest {
         return Single.just(!image.imageUrl().contains("bad"));
       });
 
-    LlmImagePolicy policy = new TestPolicy(config(), client);
+    LlmImagePolicy policy = new TestPolicy(redactConfig(), client);
 
     Vertx vertx = Vertx.vertx();
     try {
@@ -147,6 +160,82 @@ class LlmImagePolicyTest {
       .builder()
       .visionEndpoint("http://localhost:8000/v1/chat/completions")
       .build();
+  }
+
+  private static LlmImagePolicyConfiguration redactConfig() {
+    return LlmImagePolicyConfiguration
+      .builder()
+      .visionEndpoint("http://localhost:8000/v1/chat/completions")
+      .onViolation(ViolationMode.REDACT)
+      .build();
+  }
+
+  // ========================================
+  // BLOCK MODE TESTS
+  // ========================================
+
+  @Test
+  void blocksRequestWhenValidationFailsInBlockMode() {
+    VisionModelClient client = mock(VisionModelClient.class);
+    when(client.validateImage(any())).thenReturn(Single.just(false));
+
+    LlmImagePolicy policy = new TestPolicy(config(), client);
+
+    Vertx vertx = Vertx.vertx();
+    try {
+      HttpPlainExecutionContext ctx = mock(HttpPlainExecutionContext.class);
+      HttpPlainRequest request = mock(HttpPlainRequest.class);
+      when(ctx.request()).thenReturn(request);
+      when(ctx.getComponent(Vertx.class)).thenReturn(vertx);
+      when(request.body())
+        .thenReturn(Maybe.just(Buffer.buffer(singleImageRequest().encode())));
+      when(ctx.interruptWith(any(ExecutionFailure.class)))
+        .thenReturn(Completable.complete());
+
+      TestObserver<Void> observer = policy.onRequest(ctx).test();
+      observer.assertComplete();
+
+      ArgumentCaptor<ExecutionFailure> failureCaptor = ArgumentCaptor.forClass(
+        ExecutionFailure.class
+      );
+      verify(ctx).interruptWith(failureCaptor.capture());
+
+      ExecutionFailure failure = failureCaptor.getValue();
+      assertThat(failure.statusCode()).isEqualTo(400);
+      assertThat(failure.key()).isEqualTo("IMAGE_VALIDATION_FAILED");
+      assertThat(failure.message())
+        .isEqualTo("Request blocked: inappropriate image(s) detected");
+
+      verify(request, never()).body(any(Buffer.class));
+    } finally {
+      vertx.close();
+    }
+  }
+
+  @Test
+  void passesRequestWhenValidationSucceedsInBlockMode() {
+    VisionModelClient client = mock(VisionModelClient.class);
+    when(client.validateImage(any())).thenReturn(Single.just(true));
+
+    LlmImagePolicy policy = new TestPolicy(config(), client);
+
+    Vertx vertx = Vertx.vertx();
+    try {
+      HttpPlainExecutionContext ctx = mock(HttpPlainExecutionContext.class);
+      HttpPlainRequest request = mock(HttpPlainRequest.class);
+      when(ctx.request()).thenReturn(request);
+      when(ctx.getComponent(Vertx.class)).thenReturn(vertx);
+      when(request.body())
+        .thenReturn(Maybe.just(Buffer.buffer(singleImageRequest().encode())));
+
+      TestObserver<Void> observer = policy.onRequest(ctx).test();
+      observer.assertComplete();
+
+      verify(ctx, never()).interruptWith(any(ExecutionFailure.class));
+      verify(request, never()).body(any(Buffer.class));
+    } finally {
+      vertx.close();
+    }
   }
 
   private static JsonObject singleImageRequest() {

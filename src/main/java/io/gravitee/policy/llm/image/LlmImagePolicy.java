@@ -16,6 +16,7 @@
 package io.gravitee.policy.llm.image;
 
 import io.gravitee.gateway.api.buffer.Buffer;
+import io.gravitee.gateway.reactive.api.ExecutionFailure;
 import io.gravitee.gateway.reactive.api.context.http.HttpPlainExecutionContext;
 import io.gravitee.gateway.reactive.api.policy.http.HttpPolicy;
 import io.reactivex.rxjava3.core.Completable;
@@ -33,25 +34,31 @@ public class LlmImagePolicy implements HttpPolicy {
   private static final String POLICY_ID = "policy-llm-image";
   private static final String REDACTED_MESSAGE =
     "[Image redacted: validation failed]";
+
+  // Block mode error response
+  private static final String BLOCK_ERROR_KEY = "IMAGE_VALIDATION_FAILED";
+  private static final String BLOCK_ERROR_MESSAGE =
+    "Request blocked: inappropriate image(s) detected";
+  private static final int BLOCK_STATUS_CODE = 400;
   private static final String ENV_VISION_ENDPOINT =
     "http://localhost:8082/local-llm/chat/completions";
 
   private static final String DEFAULT_MODEL_NAME = "qwen3-vl:qwen3-vl:2b";
   private static final String PROMPT_TEMPLATE =
     """
-    You are an image content moderator. Analyze this image and determine if it should be ACCEPTED or REJECTED.
+      You are an image content moderator. Analyze this image and determine if it should be ACCEPTED or REJECTED.
 
-    REJECT images that contain:
-    %s
+      REJECT images that contain:
+      %s
 
-    ACCEPT images that are:
-    %s
+      ACCEPT images that are:
+      %s
 
-    Respond ONLY with a JSON object in this exact format:
-    {"decision": "ACCEPT" or "REJECT", "confidence": 0.0-1.0, "reason": "brief explanation", "flags": ["list", "of", "concerns"]}
+      Respond ONLY with a JSON object in this exact format:
+      {"decision": "ACCEPT" or "REJECT", "confidence": 0.0-1.0, "reason": "brief explanation", "flags": ["list", "of", "concerns"]}
 
-    Do not include any text outside the JSON object.
-    """;
+      Do not include any text outside the JSON object.
+      """;
   private static final int DEFAULT_TIMEOUT_MS = 30000;
 
   private static final List<String> DEFAULT_REJECTED_CATEGORIES = List.of(
@@ -164,25 +171,49 @@ public class LlmImagePolicy implements HttpPolicy {
       )
       .toList()
       .flatMapCompletable(results -> {
-        boolean modified = false;
+        List<ValidationResult> failures = results
+          .stream()
+          .filter(r -> !r.valid())
+          .toList();
+
         for (ValidationResult result : results) {
           log.info(
             "Validation result for image at {}: {}",
             String.join(".", result.image().jsonPath()),
             result.valid() ? "PASSED" : "FAILED"
           );
-          if (!result.valid()) {
-            redactImage(requestBody, result.image().jsonPath());
-            modified = true;
-          }
         }
-        if (modified) {
+
+        if (failures.isEmpty()) {
+          return Completable.complete();
+        }
+
+        // Check violation mode from config
+        ViolationMode mode = effectiveConfig.getOnViolation() != null
+          ? effectiveConfig.getOnViolation()
+          : ViolationMode.BLOCK;
+
+        if (mode == ViolationMode.BLOCK) {
           log.info(
-            "Request body modified: {} image(s) redacted",
-            results.stream().filter(r -> !r.valid()).count()
+            "Blocking request: {} image(s) failed validation",
+            failures.size()
           );
-          ctx.request().body(Buffer.buffer(requestBody.encode()));
+          return ctx.interruptWith(
+            new ExecutionFailure(BLOCK_STATUS_CODE)
+              .key(BLOCK_ERROR_KEY)
+              .message(BLOCK_ERROR_MESSAGE)
+          );
         }
+
+        // REDACT mode: replace flagged images with placeholder
+        for (ValidationResult failure : failures) {
+          redactImage(requestBody, failure.image().jsonPath());
+        }
+        log.info(
+          "Request body modified: {} image(s) redacted",
+          failures.size()
+        );
+        ctx.request().body(Buffer.buffer(requestBody.encode()));
         return Completable.complete();
       });
   }
@@ -207,11 +238,16 @@ public class LlmImagePolicy implements HttpPolicy {
       ? config.getAcceptedCategories()
       : DEFAULT_ACCEPTED_CATEGORIES;
 
-    // If validationPrompt is explicitly set, use it; otherwise build from categories
+    // If validationPrompt is explicitly set, use it; otherwise build from
+    // categories
     String validationPrompt = config.getValidationPrompt() != null &&
       !config.getValidationPrompt().isBlank()
       ? config.getValidationPrompt()
       : buildValidationPrompt(rejectedCategories, acceptedCategories);
+
+    ViolationMode onViolation = config.getOnViolation() != null
+      ? config.getOnViolation()
+      : ViolationMode.BLOCK;
 
     return LlmImagePolicyConfiguration
       .builder()
@@ -221,6 +257,7 @@ public class LlmImagePolicy implements HttpPolicy {
       .timeoutMs(timeoutMs)
       .rejectedCategories(rejectedCategories)
       .acceptedCategories(acceptedCategories)
+      .onViolation(onViolation)
       .build();
   }
 
