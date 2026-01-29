@@ -171,27 +171,26 @@ public class LlmImagePolicy implements HttpPolicy {
       )
       .toList()
       .flatMapCompletable(results -> {
-        List<ValidationResult> failures = results
-          .stream()
-          .filter(r -> !r.valid())
-          .toList();
+        List<ValidationResult> failures = new java.util.ArrayList<>();
 
+        // Log all results and collect failures in single pass
         for (ValidationResult result : results) {
           log.info(
             "Validation result for image at {}: {}",
             String.join(".", result.image().jsonPath()),
             result.valid() ? "PASSED" : "FAILED"
           );
+          if (!result.valid()) {
+            failures.add(result);
+          }
         }
 
         if (failures.isEmpty()) {
           return Completable.complete();
         }
 
-        // Check violation mode from config
-        ViolationMode mode = effectiveConfig.getOnViolation() != null
-          ? effectiveConfig.getOnViolation()
-          : ViolationMode.BLOCK;
+        // Check violation mode from config (configuration guarantees non-null)
+        ViolationMode mode = effectiveConfig.getOnViolation();
 
         if (mode == ViolationMode.BLOCK) {
           log.info(
