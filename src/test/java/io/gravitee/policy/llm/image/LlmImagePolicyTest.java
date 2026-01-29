@@ -172,9 +172,9 @@ class LlmImagePolicyTest {
   // ========================================
 
   /**
-   * This test demonstrates the bug: when interruptWith() signals via error
-   * (which is how the framework can signal interruption), the error should
-   * propagate to the caller. Currently it gets swallowed by onErrorComplete().
+   * Tests that non-ignorable errors (like interrupt signals from interruptWith)
+   * propagate to the caller rather than being swallowed. This verifies the fix
+   * for the bug where .onErrorComplete() was swallowing all errors.
    */
   @Test
   void blockModeErrorSignalPropagates() {
@@ -192,9 +192,9 @@ class LlmImagePolicyTest {
       when(request.body())
         .thenReturn(Maybe.just(Buffer.buffer(singleImageRequest().encode())));
 
-      // Simulate interruptWith signaling via error (framework behavior)
-      RuntimeException interruptSignal = new RuntimeException(
-        "Interrupt signal"
+      // Non-ignorable error should propagate (not an IOException or network error)
+      IllegalStateException interruptSignal = new IllegalStateException(
+        "Block signal from framework"
       );
       when(ctx.interruptWith(any(ExecutionFailure.class)))
         .thenReturn(Completable.error(interruptSignal));
@@ -204,12 +204,46 @@ class LlmImagePolicyTest {
       // The error should propagate, not be swallowed
       observer.assertError(interruptSignal);
 
-      // Verify interruptWith was still called with correct parameters
+      // Verify interruptWith was called with correct parameters
       ArgumentCaptor<ExecutionFailure> failureCaptor = ArgumentCaptor.forClass(
         ExecutionFailure.class
       );
       verify(ctx).interruptWith(failureCaptor.capture());
       assertThat(failureCaptor.getValue().statusCode()).isEqualTo(400);
+    } finally {
+      vertx.close();
+    }
+  }
+
+  /**
+   * Tests that ignorable network errors are swallowed gracefully
+   * to allow the request to continue even if vision validation fails.
+   */
+  @Test
+  void networkErrorsAreIgnored() {
+    VisionModelClient client = mock(VisionModelClient.class);
+    when(client.validateImage(any()))
+      .thenReturn(Single.error(new java.io.IOException("Connection refused")));
+
+    LlmImagePolicy policy = new TestPolicy(blockConfig(), client);
+
+    Vertx vertx = Vertx.vertx();
+    try {
+      HttpPlainExecutionContext ctx = mock(HttpPlainExecutionContext.class);
+      HttpPlainRequest request = mock(HttpPlainRequest.class);
+      when(ctx.request()).thenReturn(request);
+      when(ctx.getComponent(Vertx.class)).thenReturn(vertx);
+      when(request.body())
+        .thenReturn(Maybe.just(Buffer.buffer(singleImageRequest().encode())));
+
+      TestObserver<Void> observer = policy.onRequest(ctx).test();
+
+      // IOException should be ignored, request completes normally
+      observer.assertComplete();
+      observer.assertNoErrors();
+
+      // interruptWith should not have been called
+      verify(ctx, never()).interruptWith(any(ExecutionFailure.class));
     } finally {
       vertx.close();
     }

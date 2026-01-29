@@ -108,33 +108,40 @@ public class LlmImagePolicy implements HttpPolicy {
       .body()
       .flatMapCompletable(body -> handleBody(ctx, body, effectiveConfig))
       .onErrorResumeNext(throwable -> {
-        // Let interrupt signals propagate - these are intentional blocks
-        if (isInterruptSignal(throwable)) {
-          return Completable.error(throwable);
+        // Only ignore known safe errors (network issues, etc.)
+        // All other errors (including interrupt signals) propagate to framework
+        if (isIgnorableError(throwable)) {
+          log.warn(
+            "Failed to process request body for image validation",
+            throwable
+          );
+          return Completable.complete();
         }
-        // Log and swallow unexpected errors (JSON parsing, client failures)
-        log.warn(
-          "Failed to process request body for image validation",
-          throwable
-        );
-        return Completable.complete();
+        return Completable.error(throwable);
       });
   }
 
   /**
-   * Check if this throwable is an interrupt signal from ctx.interruptWith().
-   * These should propagate to the framework, not be swallowed.
+   * Check if this throwable is an error we should ignore (not propagate).
+   * Only specific expected exceptions (like client/network failures) are ignored.
+   * All other errors, including interrupt signals, are propagated to the
+   * framework.
    */
-  private boolean isInterruptSignal(Throwable throwable) {
-    // The framework may signal interrupts via specific exception types
-    // or the throwable may come from the Completable returned by interruptWith
-    String className = throwable.getClass().getName();
-    return (
-      className.contains("Interrupt") ||
-      className.contains("interrupt") ||
-      throwable.getMessage() != null &&
-      throwable.getMessage().contains("Interrupt")
-    );
+  private boolean isIgnorableError(Throwable throwable) {
+    // Walk the cause chain to find known ignorable exception types
+    Throwable current = throwable;
+    while (current != null) {
+      // Network/connection errors from the vision client can be ignored
+      if (
+        current instanceof java.net.ConnectException ||
+        current instanceof java.net.SocketTimeoutException ||
+        current instanceof java.io.IOException
+      ) {
+        return true;
+      }
+      current = current.getCause();
+    }
+    return false;
   }
 
   protected VisionModelClient createClient(
