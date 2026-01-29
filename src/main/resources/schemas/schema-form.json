@@ -61,6 +61,13 @@
         "General photography, illustrations, diagrams"
       ],
       "description": "List of content categories that should be accepted"
+    },
+    "onViolation": {
+      "title": "On Violation",
+      "type": "string",
+      "default": "BLOCK",
+      "enum": ["BLOCK", "REDACT"],
+      "description": "Action when image validation fails: BLOCK (reject request) or REDACT (replace with placeholder)"
     }
   },
   "required": ["visionEndpoint"]

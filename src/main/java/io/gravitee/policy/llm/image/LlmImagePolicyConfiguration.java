@@ -30,7 +30,9 @@ import lombok.Setter;
 @Builder
 public class LlmImagePolicyConfiguration implements PolicyConfiguration {
 
-  /** Vision model endpoint URL (e.g., http://localhost:8000/v1/chat/completions) */
+  /**
+   * Vision model endpoint URL (e.g., http://localhost:8000/v1/chat/completions)
+   */
   private String visionEndpoint;
 
   /** Model name to use for vision analysis */
@@ -64,4 +66,8 @@ public class LlmImagePolicyConfiguration implements PolicyConfiguration {
     "Artistic content without explicit material",
     "General photography, illustrations, diagrams"
   );
+
+  /** Action to take when image validation fails */
+  @Builder.Default
+  private ViolationMode onViolation = ViolationMode.BLOCK;
 }
