@@ -3,22 +3,28 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "visionEndpoint": {
-      "title": "Vision Model Endpoint",
+    "llmProxyApiId": {
       "type": "string",
-      "description": "URL of the vision model API (e.g., http://localhost:8000/v1/chat/completions)",
+      "title": "LLM Proxy API",
+      "description": "LLM Proxy API to resolve the vision model endpoint, authentication, and model from",
       "gioConfig": {
+        "uiType": "llm-proxy-api-type",
         "banner": {
-          "title": "Vision Model Endpoint",
-          "text": "The HTTP endpoint of your vision model service (VLLM, etc.)"
+          "title": "LLM Proxy API",
+          "text": "Select an LLM Proxy API to resolve the vision model endpoint, authentication, and model from the API definition."
         }
       }
     },
-    "modelName": {
-      "title": "Model Name",
+    "llmModel": {
       "type": "string",
-      "default": "qwen3-vl",
-      "description": "Name of the vision model to use"
+      "title": "LLM Model",
+      "description": "Model to use for vision analysis",
+      "gioConfig": {
+        "uiType": "llm-proxy-model-type",
+        "uiTypeProps": {
+          "llmProxyApiField": "llmProxyApiId"
+        }
+      }
     },
     "validationPrompt": {
       "title": "Validation Prompt (Override)",
@@ -70,5 +76,5 @@
       "description": "Action when image validation fails: BLOCK (reject request) or REDACT (replace with placeholder)"
     }
   },
-  "required": ["visionEndpoint"]
+  "required": []
 }

@@ -22,6 +22,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.gravitee.definition.model.v4.Api;
+import io.gravitee.definition.model.v4.endpointgroup.Endpoint;
+import io.gravitee.definition.model.v4.endpointgroup.EndpointGroup;
 import io.gravitee.gateway.api.buffer.Buffer;
 import io.gravitee.gateway.reactive.api.ExecutionFailure;
 import io.gravitee.gateway.reactive.api.context.http.HttpPlainExecutionContext;
@@ -33,6 +36,7 @@ import io.reactivex.rxjava3.observers.TestObserver;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.rxjava3.core.Vertx;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -145,16 +149,12 @@ class LlmImagePolicyTest {
   }
 
   private static LlmImagePolicyConfiguration config() {
-    return LlmImagePolicyConfiguration
-      .builder()
-      .visionEndpoint("http://localhost:8000/v1/chat/completions")
-      .build();
+    return LlmImagePolicyConfiguration.builder().build();
   }
 
   private static LlmImagePolicyConfiguration redactConfig() {
     return LlmImagePolicyConfiguration
       .builder()
-      .visionEndpoint("http://localhost:8000/v1/chat/completions")
       .onViolation(ViolationMode.REDACT)
       .build();
   }
@@ -162,7 +162,6 @@ class LlmImagePolicyTest {
   private static LlmImagePolicyConfiguration blockConfig() {
     return LlmImagePolicyConfiguration
       .builder()
-      .visionEndpoint("http://localhost:8000/v1/chat/completions")
       .onViolation(ViolationMode.BLOCK)
       .build();
   }
@@ -313,6 +312,104 @@ class LlmImagePolicyTest {
     }
   }
 
+  // ========================================
+  // ENDPOINT GROUP RESOLUTION TESTS
+  // ========================================
+
+  @Test
+  void resolvesEndpointFromEndpointGroupWhenConfigured() {
+    VisionModelClient client = mock(VisionModelClient.class);
+    when(client.validateImage(any())).thenReturn(Single.just(true));
+
+    LlmImagePolicyConfiguration endpointGroupConfig =
+      LlmImagePolicyConfiguration
+        .builder()
+        .llmProxyApiId("my-vision-group")
+        .build();
+
+    LlmImagePolicy policy = new RealResolverTestPolicy(
+      endpointGroupConfig,
+      client
+    );
+
+    Vertx vertx = Vertx.vertx();
+    try {
+      HttpPlainExecutionContext ctx = mock(HttpPlainExecutionContext.class);
+      HttpPlainRequest request = mock(HttpPlainRequest.class);
+      when(ctx.request()).thenReturn(request);
+      when(ctx.getComponent(Vertx.class)).thenReturn(vertx);
+      when(request.body())
+        .thenReturn(Maybe.just(Buffer.buffer(singleImageRequest().encode())));
+
+      // Set up API definition with an endpoint group
+      var epConfig = new JsonObject()
+        .put("target", "https://api.openai.com/v1")
+        .put(
+          "authentication",
+          new JsonObject().put("type", "BEARER").put("bearer", "sk-test-token")
+        )
+        .put(
+          "models",
+          new JsonArray().add(new JsonObject().put("name", "gpt-4o"))
+        )
+        .encode();
+
+      var endpoint = Endpoint.builder().name("ep-1").build();
+      endpoint.setConfiguration(epConfig);
+
+      var group = EndpointGroup
+        .builder()
+        .name("my-vision-group")
+        .type("llm-proxy")
+        .endpoints(List.of(endpoint))
+        .build();
+
+      var api = Api.builder().endpointGroups(List.of(group)).build();
+      when(ctx.getComponent(Api.class)).thenReturn(api);
+
+      TestObserver<Void> observer = policy.onRequest(ctx).test();
+      observer.assertComplete();
+
+      // Verify the vision client was called (endpoint was resolved)
+      verify(client).validateImage(any());
+      // Verify body was not modified (validation passed)
+      verify(request, never()).body(any(Buffer.class));
+    } finally {
+      vertx.close();
+    }
+  }
+
+  @Test
+  void skipsValidationWhenEndpointGroupNotFound() {
+    VisionModelClient client = mock(VisionModelClient.class);
+
+    LlmImagePolicyConfiguration fallbackConfig = LlmImagePolicyConfiguration
+      .builder()
+      .llmProxyApiId("nonexistent-group")
+      .build();
+
+    LlmImagePolicy policy = new RealResolverTestPolicy(fallbackConfig, client);
+
+    Vertx vertx = Vertx.vertx();
+    try {
+      HttpPlainExecutionContext ctx = mock(HttpPlainExecutionContext.class);
+      HttpPlainRequest request = mock(HttpPlainRequest.class);
+      when(ctx.request()).thenReturn(request);
+      when(ctx.getComponent(Vertx.class)).thenReturn(vertx);
+      when(ctx.getComponent(Api.class)).thenReturn(null);
+      when(request.body())
+        .thenReturn(Maybe.just(Buffer.buffer(singleImageRequest().encode())));
+
+      TestObserver<Void> observer = policy.onRequest(ctx).test();
+      observer.assertComplete();
+
+      // No static fallback — validation is skipped entirely
+      verify(client, never()).validateImage(any());
+    } finally {
+      vertx.close();
+    }
+  }
+
   private static JsonObject singleImageRequest() {
     return new JsonObject()
       .put(
@@ -373,6 +470,7 @@ class LlmImagePolicyTest {
       );
   }
 
+  /** Stubs both resolveEndpointGroup (fixed endpoint) and createClient. */
   private static class TestPolicy extends LlmImagePolicy {
 
     private final VisionModelClient client;
@@ -386,9 +484,40 @@ class LlmImagePolicyTest {
     }
 
     @Override
+    protected ResolvedEndpoint resolveEndpointGroup(
+      io.gravitee.gateway.reactive.api.context.http.HttpPlainExecutionContext ctx
+    ) {
+      return new ResolvedEndpoint("http://test-endpoint/v1", null, null, null);
+    }
+
+    @Override
     protected VisionModelClient createClient(
       Vertx vertx,
-      LlmImagePolicyConfiguration effectiveConfig
+      LlmImagePolicyConfiguration effectiveConfig,
+      ResolvedEndpoint resolvedEndpoint
+    ) {
+      return client;
+    }
+  }
+
+  /** Only stubs createClient; lets real resolveEndpointGroup run. */
+  private static class RealResolverTestPolicy extends LlmImagePolicy {
+
+    private final VisionModelClient client;
+
+    private RealResolverTestPolicy(
+      LlmImagePolicyConfiguration config,
+      VisionModelClient client
+    ) {
+      super(config);
+      this.client = client;
+    }
+
+    @Override
+    protected VisionModelClient createClient(
+      Vertx vertx,
+      LlmImagePolicyConfiguration effectiveConfig,
+      ResolvedEndpoint resolvedEndpoint
     ) {
       return client;
     }

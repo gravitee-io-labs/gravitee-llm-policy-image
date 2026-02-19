@@ -30,10 +30,16 @@ public class VisionModelClient {
 
   private final WebClient webClient;
   private final LlmImagePolicyConfiguration config;
+  private final ResolvedEndpoint resolvedEndpoint;
 
-  public VisionModelClient(Vertx vertx, LlmImagePolicyConfiguration config) {
+  public VisionModelClient(
+    Vertx vertx,
+    LlmImagePolicyConfiguration config,
+    ResolvedEndpoint resolvedEndpoint
+  ) {
     this.webClient = WebClient.create(vertx);
     this.config = config;
+    this.resolvedEndpoint = resolvedEndpoint;
   }
 
   /**
@@ -41,25 +47,26 @@ public class VisionModelClient {
    * Returns Single<Boolean> - true if decision is ACCEPT, false if REJECT or on error.
    */
   public Single<Boolean> validateImage(ImageContent image) {
-    String endpoint = config.getVisionEndpoint();
-    if (endpoint == null || endpoint.isBlank()) {
-      log.warn(
-        "Vision endpoint is not configured; redacting image at path {}",
-        (Object) image.jsonPath()
-      );
-      return Single.just(false);
-    }
+    String endpoint = resolvedEndpoint.target() + "/chat/completions";
 
     log.info("Calling vision model at {} for image validation", endpoint);
     log.debug(
       "Vision request payload: model={}, prompt={}",
-      config.getModelName(),
+      config.getLlmModel(),
       config.getValidationPrompt()
     );
     JsonObject payload = buildRequest(image);
-    return webClient
-      .postAbs(endpoint)
-      .timeout(config.getTimeoutMs())
+    var request = webClient.postAbs(endpoint).timeout(config.getTimeoutMs());
+    if (
+      resolvedEndpoint.authHeader() != null &&
+      resolvedEndpoint.authValue() != null
+    ) {
+      request.putHeader(
+        resolvedEndpoint.authHeader(),
+        resolvedEndpoint.authValue()
+      );
+    }
+    return request
       .rxSendJsonObject(payload)
       .doOnSuccess(response ->
         log.info(
@@ -227,7 +234,7 @@ public class VisionModelClient {
       .put("role", "user")
       .put("content", new JsonArray().add(textPart).add(imagePart));
     return new JsonObject()
-      .put("model", config.getModelName())
+      .put("model", config.getLlmModel())
       .put("messages", new JsonArray().add(message));
   }
 }

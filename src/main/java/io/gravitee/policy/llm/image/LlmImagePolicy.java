@@ -40,9 +40,6 @@ public class LlmImagePolicy implements HttpPolicy {
   private static final String BLOCK_ERROR_MESSAGE =
     "Request blocked: inappropriate image(s) detected";
   private static final int BLOCK_STATUS_CODE = 400;
-  private static final String ENV_VISION_ENDPOINT =
-    "http://localhost:8082/local-llm/chat/completions";
-
   private static final String DEFAULT_MODEL_NAME = "qwen3-vl:qwen3-vl:2b";
   private static final String PROMPT_TEMPLATE =
     """
@@ -91,22 +88,23 @@ public class LlmImagePolicy implements HttpPolicy {
 
   @Override
   public Completable onRequest(HttpPlainExecutionContext ctx) {
-    LlmImagePolicyConfiguration effectiveConfig = resolveConfig();
-    if (
-      effectiveConfig.getVisionEndpoint() == null ||
-      effectiveConfig.getVisionEndpoint().isBlank()
-    ) {
+    ResolvedEndpoint resolvedEndpoint = resolveEndpointGroup(ctx);
+    if (resolvedEndpoint == null) {
       log.warn(
-        "Vision endpoint is not configured; set policy config or {} to enable image validation",
-        ENV_VISION_ENDPOINT
+        "Vision endpoint is not configured; set llmProxyApiId to enable image validation"
       );
       return Completable.complete();
     }
+    LlmImagePolicyConfiguration effectiveConfig = resolveConfig(
+      resolvedEndpoint
+    );
 
     return ctx
       .request()
       .body()
-      .flatMapCompletable(body -> handleBody(ctx, body, effectiveConfig))
+      .flatMapCompletable(body ->
+        handleBody(ctx, body, effectiveConfig, resolvedEndpoint)
+      )
       .onErrorResumeNext(throwable -> {
         // Only ignore known safe errors (network issues, etc.)
         // All other errors (including interrupt signals) propagate to framework
@@ -142,15 +140,17 @@ public class LlmImagePolicy implements HttpPolicy {
 
   protected VisionModelClient createClient(
     Vertx vertx,
-    LlmImagePolicyConfiguration effectiveConfig
+    LlmImagePolicyConfiguration effectiveConfig,
+    ResolvedEndpoint resolvedEndpoint
   ) {
-    return new VisionModelClient(vertx, effectiveConfig);
+    return new VisionModelClient(vertx, effectiveConfig, resolvedEndpoint);
   }
 
   private Completable handleBody(
     HttpPlainExecutionContext ctx,
     Buffer body,
-    LlmImagePolicyConfiguration effectiveConfig
+    LlmImagePolicyConfiguration effectiveConfig,
+    ResolvedEndpoint resolvedEndpoint
   ) {
     if (body == null || body.length() == 0) {
       return Completable.complete();
@@ -188,7 +188,11 @@ public class LlmImagePolicy implements HttpPolicy {
       return Completable.complete();
     }
 
-    VisionModelClient client = createClient(vertx, effectiveConfig);
+    VisionModelClient client = createClient(
+      vertx,
+      effectiveConfig,
+      resolvedEndpoint
+    );
     return Flowable
       .fromIterable(images)
       .flatMapSingle(image ->
@@ -244,12 +248,22 @@ public class LlmImagePolicy implements HttpPolicy {
       });
   }
 
-  private LlmImagePolicyConfiguration resolveConfig() {
-    String visionEndpoint = firstNonBlank(
-      config.getVisionEndpoint(),
-      System.getenv(ENV_VISION_ENDPOINT)
+  protected ResolvedEndpoint resolveEndpointGroup(
+    HttpPlainExecutionContext ctx
+  ) {
+    String apiId = config.getLlmProxyApiId();
+    if (apiId == null || apiId.isBlank()) {
+      return null;
+    }
+    return EndpointGroupResolver.resolve(ctx);
+  }
+
+  private LlmImagePolicyConfiguration resolveConfig(ResolvedEndpoint resolved) {
+    String modelName = firstNonBlank(
+      config.getLlmModel(),
+      resolved.model(),
+      DEFAULT_MODEL_NAME
     );
-    String modelName = firstNonBlank(config.getModelName(), DEFAULT_MODEL_NAME);
     int timeoutMs = config.getTimeoutMs() > 0
       ? config.getTimeoutMs()
       : DEFAULT_TIMEOUT_MS;
@@ -277,8 +291,7 @@ public class LlmImagePolicy implements HttpPolicy {
 
     return LlmImagePolicyConfiguration
       .builder()
-      .visionEndpoint(visionEndpoint)
-      .modelName(modelName)
+      .llmModel(modelName)
       .validationPrompt(validationPrompt)
       .timeoutMs(timeoutMs)
       .rejectedCategories(rejectedCategories)

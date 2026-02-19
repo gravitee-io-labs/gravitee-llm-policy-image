@@ -31,13 +31,13 @@ import lombok.Setter;
 public class LlmImagePolicyConfiguration implements PolicyConfiguration {
 
   /**
-   * Vision model endpoint URL (e.g., http://localhost:8000/v1/chat/completions)
+   * ID of an LLM Proxy API to resolve target, auth, and model from the API
+   * definition.
    */
-  private String visionEndpoint;
+  private String llmProxyApiId;
 
-  /** Model name to use for vision analysis */
-  @Builder.Default
-  private String modelName = "qwen3-vl";
+  /** Model selected from the LLM Proxy API dropdown (highest priority override) */
+  private String llmModel;
 
   /** Prompt to send with the image for validation (overrides template if set) */
   private String validationPrompt;

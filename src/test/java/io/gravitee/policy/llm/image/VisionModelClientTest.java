@@ -34,12 +34,16 @@ class VisionModelClientTest {
     vertx = Vertx.vertx();
     LlmImagePolicyConfiguration config = LlmImagePolicyConfiguration
       .builder()
-      .visionEndpoint("http://localhost:8000/v1/chat/completions")
-      .modelName("test-model")
+      .llmModel("test-model")
       .validationPrompt("test prompt")
       .timeoutMs(5000)
       .build();
-    client = new VisionModelClient(vertx, config);
+    client =
+      new VisionModelClient(
+        vertx,
+        config,
+        new ResolvedEndpoint("http://localhost:8000/v1", null, null, null)
+      );
   }
 
   @AfterAll
